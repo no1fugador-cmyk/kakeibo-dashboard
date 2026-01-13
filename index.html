@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>家計簿ダッシュボード - Everyday Budget Style</title>
+
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#3b82f6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="家計簿">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Outfit:wght@400;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Service Worker Registration -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./service-worker.js')
+                    .then(reg => console.log('[PWA] Service Worker registered:', reg.scope))
+                    .catch(err => console.error('[PWA] Service Worker registration failed:', err));
+            });
+        }
+    </script>
+</head>
+
+<body class="bg-gradient-to-br from-[#06b6d4] via-[#3b82f6] to-[#8b5cf6] min-h-screen font-['Outfit'] text-white">
+    <div class="max-w-md mx-auto min-h-screen flex flex-col p-6 space-y-6">
+
+        <!-- Header / Date Selector -->
+        <header class="flex justify-between items-center py-4">
+            <button class="text-sm border border-white/20 rounded-full px-4 py-1 bg-white/10 backdrop-blur-md">2026年
+                ▾</button>
+            <div class="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-md">
+                <span class="text-xs">⚙️</span>
+            </div>
+        </header>
+
+        <!-- Main Display Area (Tabs) -->
+        <main class="flex-grow flex flex-col relative overflow-hidden">
+
+            <!-- Tab: Today (📈) -->
+            <div id="tab-today" class="tab-content flex-grow flex flex-col">
+                <div class="text-center space-y-2 mt-8">
+                    <p class="text-white/70 text-sm">貯金箱</p>
+                    <h1 id="total-balance" class="text-5xl font-bold tracking-tight">¥0</h1>
+                    <div class="mt-4 inline-block bg-white/20 backdrop-blur-md rounded-full px-4 py-1">
+                        <span class="text-xs">今日の予算: <span id="daily-budget" class="font-bold">¥0</span></span>
+                    </div>
+                </div>
+
+                <!-- Main Chart Area -->
+                <div class="mt-12 mb-8 relative h-64">
+                    <canvas id="mainChart"></canvas>
+                    <div id="chart-overlay"
+                        class="absolute left-1/2 bottom-12 -translate-x-1/2 bg-white text-blue-600 px-4 py-1 rounded-full text-xs font-bold shadow-lg">
+                        今日 ¥0
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab: History (📅) -->
+            <div id="tab-history" class="tab-content flex-grow flex flex-col hidden p-4">
+                <h2 class="text-2xl font-bold mb-6">日毎の収支</h2>
+                <div id="history-list" class="space-y-4 overflow-y-auto max-h-[60vh] pb-20">
+                    <!-- Items will be injected here -->
+                    <div class="text-center text-white/50 py-10">履歴がまだありません</div>
+                </div>
+            </div>
+
+            <!-- Tab: Breakdown (📊) -->
+            <div id="tab-breakdown" class="tab-content flex-grow flex flex-col hidden space-y-4 overflow-y-auto">
+                <div class="bg-white/10 backdrop-blur-xl rounded-[2.5rem] p-6 border border-white/10 shadow-xl">
+                    <h2 class="text-lg font-bold mb-4">内訳</h2>
+                    <div class="flex items-center space-x-6">
+                        <div class="relative w-32 h-32">
+                            <canvas id="innerChart"></canvas>
+                            <div class="absolute inset-0 flex items-center justify-center">
+                                <span id="breakdown-percent" class="text-xl font-bold">0%</span>
+                            </div>
+                        </div>
+                        <div class="flex-1 space-y-1">
+                            <p id="breakdown-title" class="text-white/60 text-xs">読み込み中...</p>
+                            <p id="breakdown-desc" class="text-sm font-semibold">データを入力してください</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Savings Items -->
+                <div id="savings-container"
+                    class="bg-white/10 backdrop-blur-xl rounded-[2.5rem] p-6 border border-white/10 shadow-xl space-y-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <h2 class="text-lg font-bold">積み立て貯金</h2>
+                        <button id="add-saving-btn" class="text-xs bg-white/20 px-2 py-1 rounded-md">+</button>
+                    </div>
+                    <div id="savings-list" class="space-y-4">
+                        <!-- Items injected by JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab: Settings (⚙️) -->
+            <div id="tab-settings" class="tab-content flex-grow flex flex-col hidden p-4 space-y-6">
+                <h2 class="text-2xl font-bold mb-4">設定</h2>
+                <div class="bg-white/10 backdrop-blur-xl rounded-3xl p-6 space-y-4">
+                    <div>
+                        <label class="text-xs text-white/50 block mb-1">通貨単位</label>
+                        <select class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-2 text-white">
+                            <option value="JPY">日本円 (¥)</option>
+                            <option value="USD">米ドル ($)</option>
+                        </select>
+                    </div>
+                    <button id="clear-data-btn"
+                        class="w-full bg-red-500/50 hover:bg-red-500 py-3 rounded-xl font-bold transition-colors">データを全て消去</button>
+                </div>
+            </div>
+
+        </main>
+
+        <!-- Bottom Navigation -->
+        <nav
+            class="sticky bottom-0 bg-white/10 backdrop-blur-2xl -mx-6 px-6 py-4 border-t border-white/10 flex justify-between items-center rounded-t-[2rem] z-40">
+            <div class="nav-item flex flex-col items-center cursor-pointer transition-opacity" data-target="tab-today">
+                <span class="text-xl">📈</span>
+                <span class="text-[10px] transform scale-90">今日</span>
+            </div>
+            <div class="nav-item flex flex-col items-center cursor-pointer opacity-50 transition-opacity"
+                data-target="tab-history">
+                <span class="text-xl">📅</span>
+                <span class="text-[10px] transform scale-90">履歴</span>
+            </div>
+            <div class="nav-item flex flex-col items-center cursor-pointer opacity-50 transition-opacity"
+                data-target="tab-breakdown">
+                <span class="text-xl">📊</span>
+                <span class="text-[10px] transform scale-90">内訳</span>
+            </div>
+            <div class="nav-item flex flex-col items-center cursor-pointer opacity-50 transition-opacity"
+                data-target="tab-settings">
+                <span class="text-xl">⚙️</span>
+                <span class="text-[10px] transform scale-90">設定</span>
+            </div>
+            <div class="absolute -top-6 right-6">
+                <button id="open-modal-btn"
+                    class="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center shadow-lg border-4 border-white/10 active:scale-95 transition-transform">
+                    <span class="text-2xl font-bold">+</span>
+                </button>
+            </div>
+        </nav>
+    </div>
+
+    <!-- Input Modal -->
+    <div id="input-modal" class="fixed inset-0 z-50 flex items-end justify-center hidden">
+        <div id="modal-overlay" class="absolute inset-0 bg-black/40 backdrop-blur-sm"></div>
+        <div id="modal-content"
+            class="bg-[#1e293b] w-full max-w-md rounded-t-[3rem] p-8 space-y-6 transform translate-y-full transition-transform duration-300 relative">
+            <div class="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-2"></div>
+            <div class="flex justify-between items-center">
+                <h3 class="text-xl font-bold flex-1 text-center ml-8">収支を入力</h3>
+                <button id="camera-open-btn"
+                    class="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center text-xl">📷</button>
+            </div>
+
+            <div id="form-content" class="space-y-4">
+                <div class="flex space-x-2">
+                    <button id="type-expense"
+                        class="flex-1 py-3 rounded-2xl bg-blue-500 font-bold border-2 border-transparent"
+                        data-type="expense">支出</button>
+                    <button id="type-income"
+                        class="flex-1 py-3 rounded-2xl bg-white/10 font-bold border-2 border-transparent"
+                        data-type="income">収入</button>
+                </div>
+
+                <div>
+                    <label class="text-xs text-white/50 block mb-1">金額</label>
+                    <input id="input-amount" type="text" placeholder="0" readonly
+                        class="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-3xl font-bold text-white focus:outline-none focus:border-blue-500 text-right">
+                </div>
+
+                <!-- Numeric Keypad -->
+                <div id="keypad" class="grid grid-cols-3 gap-3">
+                    <button
+                        class="keypad-btn py-4 bg-white/5 rounded-2xl font-bold text-xl active:bg-blue-500/50 transition-colors"
+                        data-val="1">1</button>
+                    <button
+                        class="keypad-btn py-4 bg-white/5 rounded-2xl font-bold text-xl active:bg-blue-500/50 transition-colors"
+                        data-val="2">2</button>
+                    <button
+                        class="keypad-btn py-4 bg-white/5 rounded-2xl font-bold text-xl active:bg-blue-500/50 transition-colors"
+                        data-val="3">3</button>
+                    <button
+                        class="keypad-btn py-4 bg-white/5 rounded-2xl font-bold text-xl active:bg-blue-500/50 transition-colors"
+                        data-val="4">4</button>
+                    <button
+                        class="keypad-btn py-4 bg-white/5 rounded-2xl font-bold text-xl active:bg-blue-500/50 transition-colors"
+                        data-val="5">5</button>
+                    <button
+                        class="keypad-btn py-4 bg-white/5 rounded-2xl font-bold text-xl active:bg-blue-500/50 transition-colors"
+                        data-val="6">6</button>
+                    <button
+                        class="keypad-btn py-4 bg-white/5 rounded-2xl font-bold text-xl active:bg-blue-500/50 transition-colors"
+                        data-val="7">7</button>
+                    <button
+                        class="keypad-btn py-4 bg-white/5 rounded-2xl font-bold text-xl active:bg-blue-500/50 transition-colors"
+                        data-val="8">8</button>
+                    <button
+                        class="keypad-btn py-4 bg-white/5 rounded-2xl font-bold text-xl active:bg-blue-500/50 transition-colors"
+                        data-val="9">9</button>
+                    <button
+                        class="keypad-btn py-4 bg-white/5 rounded-2xl font-bold text-xl active:bg-blue-500/50 transition-colors"
+                        data-val="dot">.</button>
+                    <button
+                        class="keypad-btn py-4 bg-white/5 rounded-2xl font-bold text-xl active:bg-blue-500/50 transition-colors"
+                        data-val="0">0</button>
+                    <button
+                        class="keypad-btn py-4 bg-white/5 rounded-2xl font-bold text-xl active:bg-red-500/50 transition-colors text-red-400"
+                        data-val="back">⌫</button>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="text-xs text-white/50 block mb-1">カテゴリ</label>
+                        <select id="input-category"
+                            class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white">
+                            <option value="food">食費</option>
+                            <option value="transport">交通費</option>
+                            <option value="shopping">買い物</option>
+                            <option value="hobbies">趣味</option>
+                            <option value="utility">光熱費</option>
+                            <option value="other">その他</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs text-white/50 block mb-1">日付</label>
+                        <input id="input-date" type="date"
+                            class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white">
+                    </div>
+                </div>
+
+                <button id="save-transaction-btn"
+                    class="w-full bg-blue-500 py-4 rounded-2xl font-bold text-lg mt-4 shadow-xl active:scale-95 transition-transform">保存する</button>
+                <button id="close-modal-btn" class="w-full py-4 text-white/50 font-semibold">キャンセル</button>
+            </div>
+        </div>
+    </div>
+    </div>
+
+    <!-- Camera Interface -->
+    <div id="camera-container" class="fixed inset-0 z-[60] bg-black hidden flex flex-col">
+        <div id="camera-header" class="p-6 flex justify-between items-center z-10">
+            <button id="camera-close-btn" class="text-white text-3xl">✕</button>
+            <span class="text-white font-bold">レシートをスキャン</span>
+            <div class="w-8"></div>
+        </div>
+
+        <div class="flex-grow relative overflow-hidden flex items-center justify-center">
+            <video id="camera-video" class="w-full h-full object-cover" autoplay playsinline></video>
+
+            <!-- Scanning UI Overlay -->
+            <div id="scan-frame"
+                class="absolute inset-0 border-[60px] border-black/60 flex items-center justify-center pointer-events-none">
+                <div class="w-full h-1/2 border-2 border-dashed border-blue-400 rounded-2xl relative">
+                    <div id="scan-line"
+                        class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-blue-400 to-transparent shadow-[0_0_15px_rgba(59,130,246,0.8)]">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analysis Overlay -->
+            <div id="analysis-overlay"
+                class="absolute inset-0 bg-[#0f172a]/95 backdrop-blur-xl hidden flex flex-col p-8 overflow-y-auto">
+                <div id="analysis-status" class="flex flex-col items-center justify-center space-y-4 py-8">
+                    <div class="w-12 h-12 border-4 border-blue-400 border-t-transparent rounded-full animate-spin">
+                    </div>
+                    <p class="text-white font-bold tracking-widest animate-pulse">AI分析中...</p>
+                </div>
+
+                <div id="scan-result-container" class="hidden space-y-4 w-full">
+                    <div class="flex items-center justify-between mb-2">
+                        <h4 class="text-xs font-bold text-blue-400 uppercase tracking-widest">解析結果</h4>
+                        <span class="text-[10px] text-white/40">金額をクリックして修正</span>
+                    </div>
+
+                    <div id="scan-results-list" class="space-y-3">
+                        <!-- Itemized results will be injected here -->
+                    </div>
+
+                    <div class="pt-8 space-y-4">
+                        <button id="add-all-scanned-btn"
+                            class="w-full bg-blue-500 py-4 rounded-2xl font-bold text-lg shadow-[0_10px_30px_rgba(59,130,246,0.4)] active:scale-95 transition-transform flex items-center justify-center space-x-2">
+                            <span>✅</span>
+                            <span><span id="scanned-count">0</span>項目を一括登録</span>
+                        </button>
+                        <button id="re-scan-btn"
+                            class="w-full py-2 text-white/40 font-semibold text-xs hover:text-white transition-colors">再撮影する</button>
+                    </div>
+                </div>
+
+                <div id="analysis-log"
+                    class="text-[10px] text-blue-200 mt-auto pt-8 font-mono leading-relaxed opacity-40"></div>
+            </div>
+        </div>
+
+        <div class="p-10 flex justify-center bg-black">
+            <button id="capture-btn"
+                class="w-20 h-20 bg-white rounded-full border-8 border-white/30 active:scale-90 transition-transform"></button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>

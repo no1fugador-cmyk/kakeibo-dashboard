@@ -1,0 +1,148 @@
+/* Custom styles for the budget dashboard */
+
+body {
+    -webkit-tap-highlight-color: transparent;
+    overflow-x: hidden;
+}
+
+/* Glassmorphism effects */
+.backdrop-blur-md {
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+.backdrop-blur-xl {
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+}
+
+.backdrop-blur-2xl {
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 0px;
+}
+
+/* Animations */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+main>* {
+    animation: fadeInUp 0.6s ease-out forwards;
+}
+
+/* Chart overlay animation */
+#chart-overlay {
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+/* Responsive adjustments for desktop */
+@media (min-width: 768px) {
+    body {
+        background-attachment: fixed;
+    }
+
+    .max-w-md {
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        border-right: 1px solid rgba(255, 255, 255, 0.1);
+        border-left: 1px solid rgba(255, 255, 255, 0.1);
+    }
+}
+
+/* Modal Open State */
+#input-modal:not(.hidden) #modal-content {
+    transform: translateY(0);
+}
+
+.tab-content {
+    animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+/* Active Nav Style */
+.nav-item.active {
+    opacity: 1;
+}
+
+.nav-item.active span:first-child {
+    transform: scale(1.2);
+    transition: transform 0.2s ease;
+}
+
+.nav-item.active span:last-child {
+    font-weight: bold;
+}
+
+/* Keypad Styles */
+.keypad-btn:active {
+    transform: scale(0.95);
+    background-color: rgba(59, 130, 246, 0.5) !important;
+}
+
+#scan-line {
+    animation: scanMove 2s linear infinite;
+}
+
+@keyframes scanMove {
+    0% {
+        top: 0;
+    }
+
+    100% {
+        top: 100%;
+    }
+}
+
+/* Scanned Item Animation */
+.scanned-item {
+    animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) both;
+}
+
+@keyframes popIn {
+    0% {
+        opacity: 0;
+        transform: scale(0.8) translateY(10px);
+    }
+
+    100% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.scanned-item-card {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    transition: all 0.2s ease;
+}
+
+.scanned-item-card:active {
+    background: rgba(255, 255, 255, 0.1);
+    transform: scale(0.98);
+}
+
+.keypad-btn[data-val="back"]:active {
+    background-color: rgba(239, 68, 68, 0.5) !important;
+}
