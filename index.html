@@ -18,6 +18,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Chart.js CDN -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Tesseract.js CDN (OCR) -->
+    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'></script>
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Outfit:wght@400;700&display=swap"
         rel="stylesheet">
@@ -273,6 +275,8 @@
 
         <div class="flex-grow relative overflow-hidden flex items-center justify-center">
             <video id="camera-video" class="w-full h-full object-cover" autoplay playsinline></video>
+            <!-- Hidden canvas for capture -->
+            <canvas id="capture-canvas" class="hidden"></canvas>
 
             <!-- Scanning UI Overlay -->
             <div id="scan-frame"
@@ -296,7 +300,7 @@
                 <div id="scan-result-container" class="hidden space-y-4 w-full">
                     <div class="flex items-center justify-between mb-2">
                         <h4 class="text-xs font-bold text-blue-400 uppercase tracking-widest">解析結果</h4>
-                        <span class="text-[10px] text-white/40">金額をクリックして修正</span>
+                        <span class="text-[10px] text-white/40">品名や金額を修正できます</span>
                     </div>
 
                     <div id="scan-results-list" class="space-y-3">

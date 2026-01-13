@@ -129,9 +129,10 @@ function initEventListeners() {
         });
     });
 
-    // --- Camera & OCR Simulation ---
+    // --- Camera & OCR (Tesseract.js) ---
     const cameraContainer = document.getElementById('camera-container');
     const video = document.getElementById('camera-video');
+    const captureCanvas = document.getElementById('capture-canvas');
     let stream = null;
 
     document.getElementById('camera-open-btn').addEventListener('click', async () => {
@@ -159,7 +160,7 @@ function initEventListeners() {
 
     document.getElementById('camera-close-btn').addEventListener('click', closeCamera);
 
-    document.getElementById('capture-btn').addEventListener('click', () => {
+    document.getElementById('capture-btn').addEventListener('click', async () => {
         const overlay = document.getElementById('analysis-overlay');
         const status = document.getElementById('analysis-status');
         const resultContainer = document.getElementById('scan-result-container');
@@ -169,67 +170,124 @@ function initEventListeners() {
         overlay.classList.remove('hidden');
         status.classList.remove('hidden');
         resultContainer.classList.add('hidden');
-        log.innerHTML = '';
+        log.innerHTML = '> 画像をキャプチャ中...<br>';
         list.innerHTML = '';
         currentScannedItems = [];
 
-        // Simulate "AI Analysis" with itemized extraction
-        const analysisSteps = [
-            'レシート画像を解析中...',
-            '文字領域を特定...',
-            '商品名を認識: 卵, 牛乳, 食パン...',
-            '各項目の金額を紐付け...',
-            '解析が完了しました。'
-        ];
+        // Capture frame
+        const ctx = captureCanvas.getContext('2d');
+        captureCanvas.width = video.videoWidth;
+        captureCanvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+        const imageData = captureCanvas.toDataURL('image/png');
 
-        const mockItems = [
-            { name: '卵 (10個入)', price: 298, category: 'food', emoji: '🥚' },
-            { name: '成分無調整牛乳', price: 238, category: 'food', emoji: '🥛' },
-            { name: '高級食パン', price: 450, category: 'food', emoji: '🍞' },
-            { name: 'ゴミ袋 (45L)', price: 198, category: 'other', emoji: '🗑️' }
-        ];
+        try {
+            log.innerHTML += '> OCRエンジンを起動中...<br>';
+            const worker = await Tesseract.createWorker('jpn+eng');
 
-        let stepIndex = 0;
-        const interval = setInterval(() => {
-            if (stepIndex < analysisSteps.length) {
-                log.innerHTML += `> ${analysisSteps[stepIndex]}<br>`;
-                stepIndex++;
-            } else {
-                clearInterval(interval);
+            log.innerHTML += '> 文字を解析中 (これには数秒かかる場合があります)...<br>';
+            const { data: { text } } = await worker.recognize(imageData);
+            await worker.terminate();
 
-                // Show items one by one
-                status.classList.add('hidden');
-                resultContainer.classList.remove('hidden');
+            log.innerHTML += '> 解析完了。項目を抽出しています...<br>';
 
-                mockItems.forEach((item, i) => {
-                    currentScannedItems.push(item);
-                    setTimeout(() => {
-                        const itemEl = document.createElement('div');
-                        itemEl.className = 'scanned-item scanned-item-card p-4 rounded-2xl flex justify-between items-center';
-                        itemEl.innerHTML = `
-                            <div class="flex items-center space-x-3">
-                                <span class="text-xl">${item.emoji}</span>
-                                <span class="text-sm font-semibold">${item.name}</span>
-                            </div>
-                            <span class="font-bold">¥${item.price.toLocaleString()}</span>
-                        `;
-                        list.appendChild(itemEl);
-                        document.getElementById('scanned-count').textContent = currentScannedItems.length;
-                    }, i * 300);
-                });
+            // Simple Parser: Look for lines with prices
+            const lines = text.split('\n');
+            const extracted = [];
+
+            lines.forEach(line => {
+                const priceMatch = line.match(/[¥￥\s]?([\d,]{2,10})[円\s]?$/);
+                if (priceMatch) {
+                    const priceStr = priceMatch[1].replace(/,/g, '');
+                    const price = parseInt(priceStr);
+                    if (!isNaN(price) && price > 0) {
+                        const name = line.replace(priceMatch[0], '').trim() || '不明な項目';
+                        extracted.push({ name, price, category: 'food', emoji: '🏷️' });
+                    }
+                }
+            });
+
+            if (extracted.length === 0) {
+                log.innerHTML += '<span class="text-red-400">項目が自動抽出できませんでした。手動で入力してください。</span><br>';
+                extracted.push({ name: '', price: 0, category: 'food', emoji: '🏷️' });
             }
-        }, 500);
+
+            status.classList.add('hidden');
+            resultContainer.classList.remove('hidden');
+
+            extracted.forEach((item, i) => {
+                addItemToList(item);
+            });
+
+        } catch (err) {
+            log.innerHTML += `<span class="text-red-400">エラー: ${err.message}</span><br>`;
+            status.classList.add('hidden');
+            console.error(err);
+        }
     });
 
+    function addItemToList(item) {
+        const list = document.getElementById('scan-results-list');
+        const itemEl = document.createElement('div');
+        itemEl.className = 'scanned-item scanned-item-card p-4 rounded-2xl flex flex-col space-y-2';
+
+        const idx = currentScannedItems.length;
+        currentScannedItems.push(item);
+
+        itemEl.innerHTML = `
+            <div class="flex items-center space-x-2">
+                <input type="text" value="${item.name}" placeholder="商品名" 
+                    class="scan-item-name bg-white/10 border-0 rounded-lg px-3 py-2 text-sm font-semibold flex-1 outline-none focus:bg-white/20"
+                    data-index="${idx}">
+                <button class="remove-scan-item text-white/30 text-xs">✕</button>
+            </div>
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-2 bg-white/5 rounded-lg px-2 py-1">
+                   <span class="text-xs text-white/40">¥</span>
+                   <input type="number" value="${item.price}" 
+                       class="scan-item-price bg-transparent border-0 w-24 text-right font-bold outline-none"
+                       data-index="${idx}">
+                </div>
+                <select class="scan-item-category bg-white/10 border-0 rounded-lg px-2 py-1 text-[10px] outline-none" data-index="${idx}">
+                    <option value="food" ${item.category === 'food' ? 'selected' : ''}>🍕食費</option>
+                    <option value="transport" ${item.category === 'transport' ? 'selected' : ''}>🚌交通費</option>
+                    <option value="shopping" ${item.category === 'shopping' ? 'selected' : ''}>🛍️買い物</option>
+                    <option value="hobbies" ${item.category === 'hobbies' ? 'selected' : ''}>🎮趣味</option>
+                    <option value="utility" ${item.category === 'utility' ? 'selected' : ''}>💡光熱費</option>
+                    <option value="other" ${item.category === 'other' ? 'selected' : ''}>🏷️その他</option>
+                </select>
+            </div>
+        `;
+        list.appendChild(itemEl);
+
+        itemEl.querySelector('.scan-item-name').addEventListener('input', (e) => {
+            currentScannedItems[idx].name = e.target.value;
+        });
+        itemEl.querySelector('.scan-item-price').addEventListener('input', (e) => {
+            currentScannedItems[idx].price = parseInt(e.target.value) || 0;
+        });
+        itemEl.querySelector('.scan-item-category').addEventListener('change', (e) => {
+            currentScannedItems[idx].category = e.target.value;
+        });
+        itemEl.querySelector('.remove-scan-item').addEventListener('click', () => {
+            itemEl.remove();
+            currentScannedItems[idx].price = 0;
+        });
+    }
+
     document.getElementById('add-all-scanned-btn').addEventListener('click', () => {
+        let count = 0;
         currentScannedItems.forEach(item => {
-            state.transactions.push({
-                id: Date.now() + Math.random(), // Unique ID
-                amount: -item.price,
-                category: item.category,
-                date: new Date().toISOString().split('T')[0],
-                type: 'expense'
-            });
+            if (item.price > 0) {
+                state.transactions.push({
+                    id: Date.now() + Math.random(),
+                    amount: -item.price,
+                    category: item.category,
+                    date: new Date().toISOString().split('T')[0],
+                    type: 'expense'
+                });
+                count++;
+            }
         });
 
         saveState();
@@ -237,8 +295,9 @@ function initEventListeners() {
         closeCamera();
         document.getElementById('input-modal').classList.add('hidden');
 
-        // Visual feedback
-        alert(`${currentScannedItems.length}件の項目を登録しました。`);
+        if (count > 0) {
+            alert(`${count}件の項目を登録しました。`);
+        }
     });
 
     document.getElementById('re-scan-btn').addEventListener('click', () => {
