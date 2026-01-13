@@ -7,7 +7,8 @@ let state = {
     ],
     settings: {
         currency: 'JPY',
-        lastTab: 'tab-today'
+        lastTab: 'tab-today',
+        activeYear: new Date().getFullYear().toString()
     }
 };
 
@@ -41,11 +42,24 @@ function initApp() {
     mainChart = new Chart(ctxMain, getMainChartConfig());
     innerChart = new Chart(ctxInner, getInnerChartConfig());
 
+    // Initialize Year Selector
+    const yearSelect = document.getElementById('year-select');
+    if (state.settings.activeYear) {
+        yearSelect.value = state.settings.activeYear;
+    }
+
     switchTab(state.settings.lastTab || 'tab-today');
 }
 
 // --- Event Listeners ---
 function initEventListeners() {
+    // Year Selector
+    document.getElementById('year-select').addEventListener('change', (e) => {
+        state.settings.activeYear = e.target.value;
+        saveState();
+        updateUI();
+    });
+
     // Tab switching
     document.querySelectorAll('.nav-item').forEach(item => {
         item.addEventListener('click', () => {
@@ -57,10 +71,7 @@ function initEventListeners() {
     // Modal
     const modal = document.getElementById('input-modal');
     document.getElementById('open-modal-btn').addEventListener('click', () => {
-        modal.classList.remove('hidden');
-        // Reset modal state
-        document.getElementById('input-amount').value = '';
-        document.getElementById('input-date').valueAsDate = new Date();
+        openInputModal();
     });
 
     document.getElementById('close-modal-btn').addEventListener('click', () => {
@@ -69,6 +80,17 @@ function initEventListeners() {
 
     document.getElementById('modal-overlay').addEventListener('click', () => {
         modal.classList.add('hidden');
+    });
+
+    // Deletion
+    document.getElementById('delete-transaction-btn').addEventListener('click', () => {
+        const id = document.getElementById('editing-id').value;
+        if (id && confirm('この収支を削除しますか？')) {
+            state.transactions = state.transactions.filter(t => t.id.toString() !== id.toString());
+            saveState();
+            updateUI();
+            modal.classList.add('hidden');
+        }
     });
 
     // Transaction Type Toggle
@@ -228,19 +250,43 @@ function initEventListeners() {
         const amount = parseFloat(keypadValue);
         const category = document.getElementById('input-category').value;
         const date = document.getElementById('input-date').value;
-        const type = document.querySelector('[data-active="true"]')?.getAttribute('data-type') || 'expense';
+        const type = document.querySelector('#type-expense.bg-blue-500') ? 'expense' : 'income';
+        const editingId = document.getElementById('editing-id').value;
 
         if (!keypadValue || isNaN(amount)) return alert('金額を入力してください');
 
-        const transaction = {
-            id: Date.now(),
-            amount: type === 'expense' ? -Math.abs(amount) : Math.abs(amount),
-            category,
-            date,
-            type
-        };
+        // Date check: ensure it matches active year
+        const selectedYear = new Date(date).getFullYear().toString();
+        if (selectedYear !== state.settings.activeYear) {
+            if (!confirm(`選択された日付は ${selectedYear} 年です。現在の表示年 (${state.settings.activeYear} 年) と異なりますが保存しますか？`)) {
+                return;
+            }
+        }
 
-        state.transactions.push(transaction);
+        if (editingId) {
+            // Update existing
+            const index = state.transactions.findIndex(t => t.id.toString() === editingId.toString());
+            if (index !== -1) {
+                state.transactions[index] = {
+                    ...state.transactions[index],
+                    amount: type === 'expense' ? -Math.abs(amount) : Math.abs(amount),
+                    category,
+                    date,
+                    type
+                };
+            }
+        } else {
+            // Create new
+            const transaction = {
+                id: Date.now(),
+                amount: type === 'expense' ? -Math.abs(amount) : Math.abs(amount),
+                category,
+                date,
+                type
+            };
+            state.transactions.push(transaction);
+        }
+
         keypadValue = ''; // Reset
         document.getElementById('input-amount').value = '';
         saveState();
@@ -257,20 +303,75 @@ function initEventListeners() {
     });
 }
 
+function openInputModal(transaction = null) {
+    const modal = document.getElementById('input-modal');
+    const modalTitle = document.getElementById('modal-title');
+    const deleteBtn = document.getElementById('delete-transaction-btn');
+    const typeButtons = [document.getElementById('type-expense'), document.getElementById('type-income')];
+
+    modal.classList.remove('hidden');
+
+    if (transaction) {
+        modalTitle.textContent = '収支を修正';
+        deleteBtn.classList.remove('hidden');
+        document.getElementById('editing-id').value = transaction.id;
+        document.getElementById('input-amount').value = Math.abs(transaction.amount);
+        keypadValue = Math.abs(transaction.amount).toString();
+        document.getElementById('input-category').value = transaction.category;
+        document.getElementById('input-date').value = transaction.date;
+
+        typeButtons.forEach(btn => {
+            btn.classList.toggle('bg-blue-500', btn.getAttribute('data-type') === transaction.type);
+            btn.classList.toggle('bg-white/10', btn.getAttribute('data-type') !== transaction.type);
+        });
+    } else {
+        modalTitle.textContent = '収支を入力';
+        deleteBtn.classList.add('hidden');
+        document.getElementById('editing-id').value = '';
+        document.getElementById('input-amount').value = '';
+        keypadValue = '';
+        document.getElementById('input-category').value = 'food';
+        document.getElementById('input-date').valueAsDate = new Date();
+
+        typeButtons[0].classList.add('bg-blue-500');
+        typeButtons[0].classList.remove('bg-white/10');
+        typeButtons[1].classList.remove('bg-blue-500');
+        typeButtons[1].classList.add('bg-white/10');
+    }
+}
+
+function getTransactionsByYear() {
+    return state.transactions.filter(t => {
+        const year = new Date(t.date).getFullYear().toString();
+        return year === state.settings.activeYear;
+    });
+}
+
 // --- UI Updates ---
 function updateUI() {
-    const balance = state.transactions.reduce((acc, t) => acc + t.amount, 0);
+    const yearTransactions = getTransactionsByYear();
+    const balance = yearTransactions.reduce((acc, t) => acc + t.amount, 0);
     document.getElementById('total-balance').textContent = formatCurrency(balance);
 
     // Daily budget calculation
     const today = new Date();
-    const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-    const remainingDays = lastDayOfMonth - today.getDate() + 1;
-    const dailyBudget = balance > 0 ? balance / remainingDays : 0;
+    const activeYearStr = state.settings.activeYear;
+    const isCurrentYear = today.getFullYear().toString() === activeYearStr;
+
+    let remainingDays = 0;
+    if (isCurrentYear) {
+        const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+        remainingDays = lastDayOfMonth - today.getDate() + 1;
+    } else {
+        // Simple logic for non-current years: show 0 or hypothetical
+        remainingDays = 30;
+    }
+
+    const dailyBudget = (balance > 0 && isCurrentYear) ? balance / remainingDays : 0;
     document.getElementById('daily-budget').textContent = formatCurrency(dailyBudget);
 
     // Update Chart overlay
-    document.getElementById('chart-overlay').textContent = `今日 ${formatCurrency(balance)}`;
+    document.getElementById('chart-overlay').textContent = isCurrentYear ? `今日 ${formatCurrency(balance)}` : `${activeYearStr}年計 ${formatCurrency(balance)}`;
 
     updateCharts();
     renderHistory();
@@ -295,30 +396,46 @@ function switchTab(tabId) {
 
 function renderHistory() {
     const list = document.getElementById('history-list');
-    if (state.transactions.length === 0) {
+    const yearTransactions = getTransactionsByYear();
+
+    if (yearTransactions.length === 0) {
         list.innerHTML = '<div class="text-center text-white/50 py-10">履歴がまだありません</div>';
         return;
     }
 
-    list.innerHTML = state.transactions
+    list.innerHTML = yearTransactions
         .slice()
         .reverse()
         .map(t => `
-            <div class="bg-white/10 backdrop-blur-xl rounded-2xl p-4 flex justify-between items-center border border-white/5">
+            <div class="bg-white/10 backdrop-blur-xl rounded-2xl p-4 flex justify-between items-center border border-white/5 group">
                 <div class="flex items-center space-x-3">
                     <div class="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center">
                         ${getCategoryEmoji(t.category)}
                     </div>
                     <div>
-                        <p class="font-bold capitalize">${getCategoryName(t.category)}</p>
+                        <p class="font-bold capitalize text-sm">${getCategoryName(t.category)}</p>
                         <p class="text-[10px] text-white/40">${t.date}</p>
                     </div>
                 </div>
-                <div class="${t.amount < 0 ? 'text-white' : 'text-blue-400'} font-bold">
-                    ${t.amount < 0 ? '-' : '+'}${formatCurrency(Math.abs(t.amount))}
+                <div class="flex items-center space-x-4">
+                    <div class="${t.amount < 0 ? 'text-white' : 'text-blue-400'} font-bold">
+                        ${t.amount < 0 ? '-' : '+'}${formatCurrency(Math.abs(t.amount))}
+                    </div>
+                    <button class="edit-btn text-white/30 hover:text-white transition-colors" data-id="${t.id}">✏️</button>
                 </div>
             </div>
         `).join('');
+
+    // Add event listeners to edit buttons
+    list.querySelectorAll('.edit-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.getAttribute('data-id');
+            const transaction = state.transactions.find(t => t.id.toString() === id.toString());
+            if (transaction) {
+                openInputModal(transaction);
+            }
+        });
+    });
 }
 
 function renderSavings() {
@@ -357,22 +474,31 @@ function updateBreakdown() {
 
 // --- Chart Configurations ---
 function updateCharts() {
-    // Generate simple data points from transactions
-    const last7Days = Array.from({ length: 7 }, (_, i) => {
-        const d = new Date();
-        d.setDate(d.getDate() - (6 - i));
-        return d.toISOString().split('T')[0];
-    });
+    const activeYearStr = state.settings.activeYear;
+    const today = new Date();
+    const isCurrentYear = today.getFullYear().toString() === activeYearStr;
 
-    let runningBalance = 0;
-    const chartData = last7Days.map(date => {
-        const dayTotal = state.transactions
+    // Generate date labels
+    let labels = [];
+    if (isCurrentYear) {
+        // Last 7 days
+        labels = Array.from({ length: 7 }, (_, i) => {
+            const d = new Date();
+            d.setDate(d.getDate() - (6 - i));
+            return d.toISOString().split('T')[0];
+        });
+    } else {
+        // Just some sample points for non-current years (e.g., month ends)
+        labels = Array.from({ length: 6 }, (_, i) => `${activeYearStr}-${String((i + 1) * 2).padStart(2, '0')}-01`);
+    }
+
+    const chartData = labels.map(date => {
+        return state.transactions
             .filter(t => t.date <= date)
             .reduce((acc, t) => acc + t.amount, 0);
-        return dayTotal;
     });
 
-    mainChart.data.labels = last7Days;
+    mainChart.data.labels = labels;
     mainChart.data.datasets[0].data = chartData;
     mainChart.update();
 }
