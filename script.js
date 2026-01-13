@@ -12,6 +12,8 @@ let state = {
 };
 
 let mainChart, innerChart;
+let keypadValue = '';
+let currentScannedItems = [];
 
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -84,7 +86,6 @@ function initEventListeners() {
     });
 
     // Keypad Logic
-    let keypadValue = '';
     document.querySelectorAll('.keypad-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const val = btn.getAttribute('data-val');
@@ -128,11 +129,13 @@ function initEventListeners() {
         }
         cameraContainer.classList.add('hidden');
         document.getElementById('analysis-overlay').classList.add('hidden');
+        // Reset scan state
+        document.getElementById('analysis-log').innerHTML = '';
+        document.getElementById('scan-results-list').innerHTML = '';
+        currentScannedItems = [];
     };
 
     document.getElementById('camera-close-btn').addEventListener('click', closeCamera);
-
-    let currentScannedItems = [];
 
     document.getElementById('capture-btn').addEventListener('click', () => {
         const overlay = document.getElementById('analysis-overlay');
