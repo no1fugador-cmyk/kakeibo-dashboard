@@ -212,6 +212,26 @@ function initEventListeners() {
 - total_amount は必ず items の price の合計と一致させる
 - JSONのみを返す（説明不要）`;
 
+    function extractJSON(content) {
+        // Try to find the first '{' and last '}'
+        const start = content.indexOf('{');
+        const end = content.lastIndexOf('}');
+
+        if (start === -1 || end === -1 || end < start) {
+            console.error('No JSON block found in content:', content);
+            throw new Error('AIの応答に有効なJSONデータが含まれていません。');
+        }
+
+        const jsonStr = content.substring(start, end + 1);
+        try {
+            return JSON.parse(jsonStr);
+        } catch (e) {
+            console.error('Failed to parse extracted JSON:', jsonStr);
+            console.error('Original content:', content);
+            throw new Error(`JSON解析エラー: AIの出力が正しくありません。 (内容: ${jsonStr.substring(0, 50)}...)`);
+        }
+    }
+
     // --- Claude Vision API Logic ---
     async function callClaudeVisionAPI(base64Image) {
         const apiKey = state.settings.anthropicApiKey;
@@ -261,13 +281,10 @@ function initEventListeners() {
         console.log('Claude API raw response:', result);
 
         if (!result.content || !result.content[0] || !result.content[0].text) {
-            console.error('Unexpected Claude API structure:', result);
             throw new Error('Claude APIから予期しない形式の応答がありました。');
         }
 
-        const content = result.content[0].text;
-        const jsonStr = content.replace(/```json\n?|\n?```/g, '').trim();
-        return JSON.parse(jsonStr);
+        return extractJSON(result.content[0].text);
     }
 
     // --- Local LLM API (OpenAI Compatible) ---
@@ -320,17 +337,13 @@ function initEventListeners() {
         console.log('Local LLM API raw response:', result);
 
         if (!result.choices || !result.choices[0] || !result.choices[0].message || !result.choices[0].message.content) {
-            console.error('Unexpected Local LLM API structure:', result);
-            // More specific error message
             if (result.error) {
                 throw new Error(`Local LLM Error: ${result.error.message || JSON.stringify(result.error)}`);
             }
-            throw new Error('ローカルLLMから予期しない形式の応答がありました。OpenAI互換のChat形式か確認してください。');
+            throw new Error('ローカルLLMから予期しない形式の応答がありました。');
         }
 
-        const content = result.choices[0].message.content;
-        const jsonStr = content.replace(/```json\n?|\n?```/g, '').trim();
-        return JSON.parse(jsonStr);
+        return extractJSON(result.choices[0].message.content);
     }
 
     // --- Camera & OCR (Tesseract.js) ---
