@@ -265,8 +265,13 @@ function initEventListeners() {
 
     // --- Local LLM API (OpenAI Compatible) ---
     async function callLocalLLMAPI(base64Image) {
-        const baseUrl = state.settings.localApiBase || 'http://localhost:1234/v1';
-        const model = state.settings.localModelName || '';
+        let baseUrl = state.settings.localApiBase || 'http://localhost:1234/v1';
+        // Normalize URL: Ensure it ends with /v1
+        if (!baseUrl.endsWith('/v1')) {
+            baseUrl = baseUrl.replace(/\/+$/, '') + '/v1';
+        }
+
+        const model = state.settings.localModelName || 'lightonocr-1b-1025';
 
         const response = await fetch(`${baseUrl}/chat/completions`, {
             method: 'POST',
