@@ -9,7 +9,10 @@ let state = {
         currency: 'JPY',
         lastTab: 'tab-today',
         activeYear: new Date().getFullYear().toString(),
-        anthropicApiKey: ''
+        anthropicApiKey: '',
+        aiEngine: 'claude',
+        localApiBase: 'http://localhost:1234/v1',
+        localModelName: ''
     }
 };
 
@@ -132,20 +135,55 @@ function initEventListeners() {
 
     // --- API Key & Settings ---
     const apiKeyInput = document.getElementById('anthropic-api-key');
+    const aiEngineSelect = document.getElementById('ai-engine-select');
+    const localApiBaseInput = document.getElementById('local-api-base');
+    const localModelNameInput = document.getElementById('local-model-name');
+    const claudeSettings = document.getElementById('claude-settings');
+    const localSettings = document.getElementById('local-settings');
+
+    function updateSettingsUI() {
+        if (aiEngineSelect) {
+            aiEngineSelect.value = state.settings.aiEngine || 'claude';
+            if (claudeSettings) claudeSettings.classList.toggle('hidden', aiEngineSelect.value !== 'claude');
+            if (localSettings) localSettings.classList.toggle('hidden', aiEngineSelect.value !== 'local');
+        }
+        if (apiKeyInput) apiKeyInput.value = state.settings.anthropicApiKey || '';
+        if (localApiBaseInput) localApiBaseInput.value = state.settings.localApiBase || 'http://localhost:1234/v1';
+        if (localModelNameInput) localModelNameInput.value = state.settings.localModelName || '';
+    }
+
+    if (aiEngineSelect) {
+        aiEngineSelect.addEventListener('change', (e) => {
+            state.settings.aiEngine = e.target.value;
+            updateSettingsUI();
+            saveState();
+        });
+    }
+
     if (apiKeyInput) {
-        apiKeyInput.value = state.settings.anthropicApiKey || '';
         apiKeyInput.addEventListener('change', (e) => {
             state.settings.anthropicApiKey = e.target.value;
             saveState();
         });
     }
 
-    // --- Claude Vision API Logic ---
-    async function callClaudeVisionAPI(base64Image) {
-        const apiKey = state.settings.anthropicApiKey;
-        if (!apiKey) throw new Error('APIキーが設定されていません。設定画面で入力してください。');
+    if (localApiBaseInput) {
+        localApiBaseInput.addEventListener('change', (e) => {
+            state.settings.localApiBase = e.target.value;
+            saveState();
+        });
+    }
 
-        const systemPrompt = `あなたはレシート画像から家計簿用の情報を抽出する専門家です。 JSON形式で正確に情報を返してください。
+    if (localModelNameInput) {
+        localModelNameInput.addEventListener('change', (e) => {
+            state.settings.localModelName = e.target.value;
+            saveState();
+        });
+    }
+
+    updateSettingsUI();
+
+    const RECEIPT_SYSTEM_PROMPT = `あなたはレシート画像から家計簿用の情報を抽出する専門家です。 JSON形式で正確に情報を返してください。
 【最重要】total_amountの決定ルール：
 ✅ 正しい：「お買上金額」「合計金額」「小計」
 ❌ 間違い：「お預かり」「お釣り」「現金」
@@ -174,6 +212,11 @@ function initEventListeners() {
 - total_amount は必ず items の price の合計と一致させる
 - JSONのみを返す（説明不要）`;
 
+    // --- Claude Vision API Logic ---
+    async function callClaudeVisionAPI(base64Image) {
+        const apiKey = state.settings.anthropicApiKey;
+        if (!apiKey) throw new Error('ClaudeのAPIキーが設定されていません。設定画面で入力してください。');
+
         const base64Data = base64Image.split(',')[1];
         const response = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
@@ -186,7 +229,7 @@ function initEventListeners() {
             body: JSON.stringify({
                 model: 'claude-3-5-sonnet-20241022',
                 max_tokens: 1024,
-                system: systemPrompt,
+                system: RECEIPT_SYSTEM_PROMPT,
                 messages: [
                     {
                         role: 'user',
@@ -216,6 +259,53 @@ function initEventListeners() {
 
         const result = await response.json();
         const content = result.content[0].text;
+        const jsonStr = content.replace(/```json\n?|\n?```/g, '').trim();
+        return JSON.parse(jsonStr);
+    }
+
+    // --- Local LLM API (OpenAI Compatible) ---
+    async function callLocalLLMAPI(base64Image) {
+        const baseUrl = state.settings.localApiBase || 'http://localhost:1234/v1';
+        const model = state.settings.localModelName || '';
+
+        const response = await fetch(`${baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: model,
+                messages: [
+                    {
+                        role: "system",
+                        content: RECEIPT_SYSTEM_PROMPT
+                    },
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "text",
+                                text: "このレシートから情報を抽出してJSONで返してください。"
+                            },
+                            {
+                                type: "image_url",
+                                image_url: {
+                                    url: base64Image
+                                }
+                            }
+                        ]
+                    }
+                ],
+                temperature: 0
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Local LLM API Error: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        const content = result.choices[0].message.content;
         const jsonStr = content.replace(/```json\n?|\n?```/g, '').trim();
         return JSON.parse(jsonStr);
     }
@@ -272,26 +362,17 @@ function initEventListeners() {
         ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
         const imageData = captureCanvas.toDataURL('image/png');
 
-        const useClaude = state.settings.anthropicApiKey && state.settings.anthropicApiKey.startsWith('sk-ant');
+        const engine = state.settings.aiEngine || 'claude';
 
         try {
-            if (useClaude) {
-                log.innerHTML += '> Claude Vision API で解析中 (高精度)...<br>';
+            if (engine === 'claude') {
+                log.innerHTML += '> Claude Vision API で解析中 (高精度/有料)...<br>';
                 const data = await callClaudeVisionAPI(imageData);
-
-                log.innerHTML += '> 解析完了。項目を表示します...<br>';
-                if (data.items && data.items.length > 0) {
-                    data.items.forEach(item => {
-                        addItemToList({
-                            name: item.name,
-                            price: item.price,
-                            category: 'food',
-                            emoji: '🏷️'
-                        });
-                    });
-                } else {
-                    throw new Error('項目が見つかりませんでした。');
-                }
+                displayExtractedItems(data);
+            } else if (engine === 'local') {
+                log.innerHTML += '> ローカルLLM で解析中 (無料)...<br>';
+                const data = await callLocalLLMAPI(imageData);
+                displayExtractedItems(data);
             } else {
                 log.innerHTML += '> Tesseract.js (標準OCR) で解析中...<br>';
                 const worker = await Tesseract.createWorker('jpn+eng');
@@ -299,27 +380,8 @@ function initEventListeners() {
                 await worker.terminate();
 
                 log.innerHTML += '> 解析完了。項目を抽出しています...<br>';
-
-                const lines = text.split('\n');
-                const extracted = [];
-                lines.forEach(line => {
-                    const priceMatch = line.match(/[¥￥\s]?([\d,]{2,10})[円\s]?$/);
-                    if (priceMatch) {
-                        const priceStr = priceMatch[1].replace(/,/g, '');
-                        const price = parseInt(priceStr);
-                        if (!isNaN(price) && price > 0) {
-                            const name = line.replace(priceMatch[0], '').trim() || '不明な項目';
-                            extracted.push({ name, price, category: 'food', emoji: '🏷️' });
-                        }
-                    }
-                });
-
-                if (extracted.length === 0) {
-                    log.innerHTML += '<span class="text-red-400">項目が自動抽出できませんでした。手動で入力してください。</span><br>';
-                    extracted.push({ name: '', price: 0, category: 'food', emoji: '🏷️' });
-                }
-
-                extracted.forEach(item => addItemToList(item));
+                const items = parseTesseractResults(text);
+                displayExtractedItems({ items });
             }
 
             status.classList.add('hidden');
@@ -327,13 +389,52 @@ function initEventListeners() {
 
         } catch (err) {
             log.innerHTML += `<span class="text-red-400">解析エラー: ${err.message}</span><br>`;
-            if (!useClaude && !state.settings.anthropicApiKey) {
-                log.innerHTML += '<p class="text-[10px] mt-2 text-white/50">※高精度な解析には設定画面で Claude API キーの登録が必要です。</p>';
+            if (engine === 'local') {
+                log.innerHTML += '<p class="text-[10px] mt-2 text-white/50">※ローカルLLMの設定（URL）やサーバーの起動状態を確認してください。CORSエラーが発生する場合は、ブラウザやサーバー側の設定が必要です。</p>';
+            } else if (engine === 'claude' && !state.settings.anthropicApiKey) {
+                log.innerHTML += '<p class="text-[10px] mt-2 text-white/50">※設定画面で API キーの登録が必要です。</p>';
             }
             status.classList.add('hidden');
             console.error(err);
         }
     });
+
+    function parseTesseractResults(text) {
+        const lines = text.split('\n');
+        const extracted = [];
+        lines.forEach(line => {
+            const priceMatch = line.match(/[¥￥\s]?([\d,]{2,10})[円\s]?$/);
+            if (priceMatch) {
+                const priceStr = priceMatch[1].replace(/,/g, '');
+                const price = parseInt(priceStr);
+                if (!isNaN(price) && price > 0) {
+                    const name = line.replace(priceMatch[0], '').trim() || '不明な項目';
+                    extracted.push({ name, price, category: 'food', emoji: '🏷️' });
+                }
+            }
+        });
+        if (extracted.length === 0) {
+            extracted.push({ name: '', price: 0, category: 'food', emoji: '🏷️' });
+        }
+        return extracted;
+    }
+
+    function displayExtractedItems(data) {
+        const log = document.getElementById('analysis-log');
+        log.innerHTML += '> 解析完了。項目を表示します...<br>';
+        if (data.items && data.items.length > 0) {
+            data.items.forEach(item => {
+                addItemToList({
+                    name: item.name,
+                    price: item.price,
+                    category: 'food',
+                    emoji: '🏷️'
+                });
+            });
+        } else {
+            throw new Error('項目が見つかりませんでした。');
+        }
+    }
 
     function addItemToList(item) {
         const list = document.getElementById('scan-results-list');

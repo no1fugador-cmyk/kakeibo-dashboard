@@ -118,16 +118,45 @@
                 </div>
             </div>
 
-            <!-- Tab: Settings (⚙️) -->
             <div id="tab-settings" class="tab-content flex-grow flex flex-col hidden p-4 space-y-6">
                 <h2 class="text-2xl font-bold mb-4">設定</h2>
+
+                <!-- AI Analysis Settings -->
                 <div class="bg-white/10 backdrop-blur-xl rounded-3xl p-6 space-y-4">
+                    <h3 class="text-sm font-bold text-blue-400">AI解析設定 (OCR)</h3>
                     <div>
-                        <label class="text-xs text-white/50 block mb-1">Anthropic API Key</label>
-                        <input id="anthropic-api-key" type="password" placeholder="sk-ant-..."
-                            class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-blue-500">
-                        <p class="text-[10px] text-white/40 mt-1">※キーはデバイス内(localStorage)にのみ保存されます。</p>
+                        <label class="text-xs text-white/50 block mb-1">エンジン選択</label>
+                        <select id="ai-engine-select"
+                            class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-2 text-white outline-none">
+                            <option value="claude">Claude Vision API (有料/高精度)</option>
+                            <option value="local">ローカルLLM (無料/LM Studio等)</option>
+                        </select>
                     </div>
+
+                    <div id="claude-settings" class="space-y-4">
+                        <div>
+                            <label class="text-xs text-white/50 block mb-1">Anthropic API Key</label>
+                            <input id="anthropic-api-key" type="password" placeholder="sk-ant-..."
+                                class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-blue-500">
+                        </div>
+                    </div>
+
+                    <div id="local-settings" class="space-y-4 hidden">
+                        <div>
+                            <label class="text-xs text-white/50 block mb-1">API Base URL (OpenAI互換)</label>
+                            <input id="local-api-base" type="text" placeholder="http://localhost:1234/v1"
+                                class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="text-xs text-white/50 block mb-1">モデル名 (オプション)</label>
+                            <input id="local-model-name" type="text" placeholder="llama-3.2-vision"
+                                class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-blue-500">
+                        </div>
+                    </div>
+                    <p class="text-[10px] text-white/40">※APIキーやURLはブラウザ内にのみ保存されます。</p>
+                </div>
+
+                <div class="bg-white/10 backdrop-blur-xl rounded-3xl p-6 space-y-4">
                     <div>
                         <label class="text-xs text-white/50 block mb-1">通貨単位</label>
                         <select class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-2 text-white">
