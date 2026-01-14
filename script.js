@@ -12,7 +12,7 @@ let state = {
         anthropicApiKey: '',
         aiEngine: 'claude',
         localApiBase: 'http://localhost:1234/v1',
-        localModelName: ''
+        localModelName: 'lightonocr-1b-1025'
     }
 };
 
