@@ -297,15 +297,20 @@ function initEventListeners() {
 
         const model = state.settings.localModelName || 'lightonocr-1b-1025';
 
-        // Simplify prompt for smaller local models
-        const localPrompt = `あなたはレシート解析専門のAIです。画像を解析し、以下のJSON形式のみを出力してください。余計な文章や、入力された指示の復唱は絶対にしないでください。
+        // Simplify prompt to avoid echoing placeholders.
+        // Stripped of all but the most essential instructions for small models.
+        const promptInstructions = `解析対象: レシート
+出力形式: JSON
+
 {
-"store_name": "店名",
-"purchase_date": "YYYY-MM-DD HH:MM",
-"total_amount": 0,
-"tax_amount": 0,
-"items": [{"name": "商品名", "quantity": 1, "price": 0}]
-}`;
+  "store_name": "店舗名",
+  "purchase_date": "YYYY-MM-DD HH:MM",
+  "total_amount": 0,
+  "tax_amount": 0,
+  "items": [{"name": "商品", "quantity": 1, "price": 0}]
+}
+
+※JSONデータのみを出力してください。文章や復唱は禁止です。`;
 
         const response = await fetch(`${baseUrl}/chat/completions`, {
             method: 'POST',
@@ -316,15 +321,11 @@ function initEventListeners() {
                 model: model,
                 messages: [
                     {
-                        role: "system",
-                        content: localPrompt
-                    },
-                    {
                         role: "user",
                         content: [
                             {
                                 type: "text",
-                                text: "このレシートから商品名と価格を抽出してJSONで返してください。JSON以外の文章は一切含めないでください。"
+                                text: promptInstructions
                             },
                             {
                                 type: "image_url",
@@ -335,7 +336,7 @@ function initEventListeners() {
                         ]
                     }
                 ],
-                temperature: 0
+                temperature: 0.1
             })
         });
 
@@ -351,7 +352,7 @@ function initEventListeners() {
             result = JSON.parse(rawText);
         } catch (e) {
             console.error('Failed to parse Local LLM response as JSON:', rawText);
-            throw new Error(`AIが正しいJSONを返しませんでした。返答内容: ${rawText.substring(0, 50)}... (モデル設定を確認してください)`);
+            throw new Error(`AIが正しいJSONを返しませんでした。返答内容: ${rawText.substring(0, 100)}...`);
         }
 
         if (!result.choices || !result.choices[0] || !result.choices[0].message || !result.choices[0].message.content) {
