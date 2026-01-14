@@ -258,6 +258,13 @@ function initEventListeners() {
         }
 
         const result = await response.json();
+        console.log('Claude API raw response:', result);
+
+        if (!result.content || !result.content[0] || !result.content[0].text) {
+            console.error('Unexpected Claude API structure:', result);
+            throw new Error('Claude APIから予期しない形式の応答がありました。');
+        }
+
         const content = result.content[0].text;
         const jsonStr = content.replace(/```json\n?|\n?```/g, '').trim();
         return JSON.parse(jsonStr);
@@ -310,6 +317,17 @@ function initEventListeners() {
         }
 
         const result = await response.json();
+        console.log('Local LLM API raw response:', result);
+
+        if (!result.choices || !result.choices[0] || !result.choices[0].message || !result.choices[0].message.content) {
+            console.error('Unexpected Local LLM API structure:', result);
+            // More specific error message
+            if (result.error) {
+                throw new Error(`Local LLM Error: ${result.error.message || JSON.stringify(result.error)}`);
+            }
+            throw new Error('ローカルLLMから予期しない形式の応答がありました。OpenAI互換のChat形式か確認してください。');
+        }
+
         const content = result.choices[0].message.content;
         const jsonStr = content.replace(/```json\n?|\n?```/g, '').trim();
         return JSON.parse(jsonStr);
