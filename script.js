@@ -8,7 +8,8 @@ let state = {
     settings: {
         currency: 'JPY',
         lastTab: 'tab-today',
-        activeYear: new Date().getFullYear().toString()
+        activeYear: new Date().getFullYear().toString(),
+        anthropicApiKey: ''
     }
 };
 
@@ -129,6 +130,96 @@ function initEventListeners() {
         });
     });
 
+    // --- API Key & Settings ---
+    const apiKeyInput = document.getElementById('anthropic-api-key');
+    if (apiKeyInput) {
+        apiKeyInput.value = state.settings.anthropicApiKey || '';
+        apiKeyInput.addEventListener('change', (e) => {
+            state.settings.anthropicApiKey = e.target.value;
+            saveState();
+        });
+    }
+
+    // --- Claude Vision API Logic ---
+    async function callClaudeVisionAPI(base64Image) {
+        const apiKey = state.settings.anthropicApiKey;
+        if (!apiKey) throw new Error('APIキーが設定されていません。設定画面で入力してください。');
+
+        const systemPrompt = `あなたはレシート画像から家計簿用の情報を抽出する専門家です。 JSON形式で正確に情報を返してください。
+【最重要】total_amountの決定ルール：
+✅ 正しい：「お買上金額」「合計金額」「小計」
+❌ 間違い：「お預かり」「お釣り」「現金」
+【最重要】total_amount の決定方法（この順序で実行）：
+1. items リストの price をすべて合計する
+2. その合計値を total_amount として使用する
+3. レシートに「お買上金額」の表示があっても、items の合計を優先する
+4. 「お預かり」「お釣り」は絶対に使用しない
+必須項目：
+- store_name: 店舗名
+- purchase_date: 購入日時（YYYY-MM-DD HH:MM形式、時刻不明なら12:00）
+- total_amount: お買上金額（商品の合計金額、必ずitemsの合計と一致）
+- tax_amount: 消費税額（不明な場合は0）
+- items: 商品リスト（name, quantity, price）
+出力形式：
+{
+  "store_name": "店舗名",
+  "purchase_date": "2025-11-22 14:30",
+  "total_amount": 1500,
+  "tax_amount": 150,
+  "payment_method": "現金",
+  "items": [ {"name": "商品名", "quantity": 1, "price": 500} ]
+}
+注意：
+- 金額は数値型（カンマや円記号を除く）
+- total_amount は必ず items の price の合計と一致させる
+- JSONのみを返す（説明不要）`;
+
+        const base64Data = base64Image.split(',')[1];
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01',
+                'content-type': 'application/json',
+                'dangerously-allow-browser': 'true'
+            },
+            body: JSON.stringify({
+                model: 'claude-3-5-sonnet-20241022',
+                max_tokens: 1024,
+                system: systemPrompt,
+                messages: [
+                    {
+                        role: 'user',
+                        content: [
+                            {
+                                type: 'image',
+                                source: {
+                                    type: 'base64',
+                                    media_type: 'image/png',
+                                    data: base64Data
+                                }
+                            },
+                            {
+                                type: 'text',
+                                text: 'このレシートから情報を抽出してJSONで返してください。'
+                            }
+                        ]
+                    }
+                ]
+            })
+        });
+
+        if (!response.ok) {
+            const errData = await response.json();
+            throw new Error(`Claude API Error: ${errData.error?.message || response.statusText}`);
+        }
+
+        const result = await response.json();
+        const content = result.content[0].text;
+        const jsonStr = content.replace(/```json\n?|\n?```/g, '').trim();
+        return JSON.parse(jsonStr);
+    }
+
     // --- Camera & OCR (Tesseract.js) ---
     const cameraContainer = document.getElementById('camera-container');
     const video = document.getElementById('camera-video');
@@ -181,46 +272,64 @@ function initEventListeners() {
         ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
         const imageData = captureCanvas.toDataURL('image/png');
 
+        const useClaude = state.settings.anthropicApiKey && state.settings.anthropicApiKey.startsWith('sk-ant');
+
         try {
-            log.innerHTML += '> OCRエンジンを起動中...<br>';
-            const worker = await Tesseract.createWorker('jpn+eng');
+            if (useClaude) {
+                log.innerHTML += '> Claude Vision API で解析中 (高精度)...<br>';
+                const data = await callClaudeVisionAPI(imageData);
 
-            log.innerHTML += '> 文字を解析中 (これには数秒かかる場合があります)...<br>';
-            const { data: { text } } = await worker.recognize(imageData);
-            await worker.terminate();
-
-            log.innerHTML += '> 解析完了。項目を抽出しています...<br>';
-
-            // Simple Parser: Look for lines with prices
-            const lines = text.split('\n');
-            const extracted = [];
-
-            lines.forEach(line => {
-                const priceMatch = line.match(/[¥￥\s]?([\d,]{2,10})[円\s]?$/);
-                if (priceMatch) {
-                    const priceStr = priceMatch[1].replace(/,/g, '');
-                    const price = parseInt(priceStr);
-                    if (!isNaN(price) && price > 0) {
-                        const name = line.replace(priceMatch[0], '').trim() || '不明な項目';
-                        extracted.push({ name, price, category: 'food', emoji: '🏷️' });
-                    }
+                log.innerHTML += '> 解析完了。項目を表示します...<br>';
+                if (data.items && data.items.length > 0) {
+                    data.items.forEach(item => {
+                        addItemToList({
+                            name: item.name,
+                            price: item.price,
+                            category: 'food',
+                            emoji: '🏷️'
+                        });
+                    });
+                } else {
+                    throw new Error('項目が見つかりませんでした。');
                 }
-            });
+            } else {
+                log.innerHTML += '> Tesseract.js (標準OCR) で解析中...<br>';
+                const worker = await Tesseract.createWorker('jpn+eng');
+                const { data: { text } } = await worker.recognize(imageData);
+                await worker.terminate();
 
-            if (extracted.length === 0) {
-                log.innerHTML += '<span class="text-red-400">項目が自動抽出できませんでした。手動で入力してください。</span><br>';
-                extracted.push({ name: '', price: 0, category: 'food', emoji: '🏷️' });
+                log.innerHTML += '> 解析完了。項目を抽出しています...<br>';
+
+                const lines = text.split('\n');
+                const extracted = [];
+                lines.forEach(line => {
+                    const priceMatch = line.match(/[¥￥\s]?([\d,]{2,10})[円\s]?$/);
+                    if (priceMatch) {
+                        const priceStr = priceMatch[1].replace(/,/g, '');
+                        const price = parseInt(priceStr);
+                        if (!isNaN(price) && price > 0) {
+                            const name = line.replace(priceMatch[0], '').trim() || '不明な項目';
+                            extracted.push({ name, price, category: 'food', emoji: '🏷️' });
+                        }
+                    }
+                });
+
+                if (extracted.length === 0) {
+                    log.innerHTML += '<span class="text-red-400">項目が自動抽出できませんでした。手動で入力してください。</span><br>';
+                    extracted.push({ name: '', price: 0, category: 'food', emoji: '🏷️' });
+                }
+
+                extracted.forEach(item => addItemToList(item));
             }
 
             status.classList.add('hidden');
             resultContainer.classList.remove('hidden');
 
-            extracted.forEach((item, i) => {
-                addItemToList(item);
-            });
-
         } catch (err) {
-            log.innerHTML += `<span class="text-red-400">エラー: ${err.message}</span><br>`;
+            log.innerHTML += `<span class="text-red-400">解析エラー: ${err.message}</span><br>`;
+            if (!useClaude && !state.settings.anthropicApiKey) {
+                log.innerHTML += '<p class="text-[10px] mt-2 text-white/50">※高精度な解析には設定画面で Claude API キーの登録が必要です。</p>';
+            }
             status.classList.add('hidden');
             console.error(err);
         }
